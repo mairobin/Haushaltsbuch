@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 
 from Kategorien import CATEGORIES
+from Kategorien import pretty_print_categories
 
 def split_df(df):
     # Splits records in income, expenses and paypal
@@ -44,22 +45,29 @@ def check_number_of_records(num_records, num_records_full_df):
 def _get_category_from_user(df, row):
     row_as_df = pandas.DataFrame(columns=df.columns)
     row_as_df = row_as_df.append(row)
+    print()
     print(row_as_df.to_string())
+    print()
     print('Welcher Kategorie soll diese Transaktion zugeordnet werden?')
-    for k, v in CATEGORIES.items():
-        print(k + " " + v)
+    pretty_print_categories()
     category = str(input("Gebe Kategorie ein: "))
     return category
 
-def _get_category_from_history(history, identifier):
-
-    # Falls Bargeldauszahlung steht Kategorie fest
+def is_cash(identifier):
     if str(identifier).startswith("Bargeldauszahlung"):
         return "Unzurechenbare Barzahlungen"
 
-    # Falls Identifier Kategorie bestimmt
+
+def _find_category(history, identifier):
+    # Entferne VISA da es bei Visa Abhebungen vorangestellt wird
     if identifier.startswith('VISA '):
         identifier = identifier.replace("VISA ", "")
+
+    # If Cash
+    if str(identifier).startswith("Bargeldauszahlung"):
+        category = "Unzurechenbare Barzahlungen"
+
+    # Lookup in history
     category = history.get(identifier)
     return category
 
@@ -68,6 +76,8 @@ def _add_to_history(history, identifier, category):
     to_add = False
     if str(input("y / n: ")).lower() == "y":
         to_add = True
+        if identifier.startswith("VISA "):
+            identifier = identifier.replace("VISA ", "")
     if to_add:
         history[identifier] = category
 
@@ -78,7 +88,7 @@ def categorize(df, history):
     for index, row in df.iterrows():
         identifier = str(row['Auftraggeber/Empfänger'])
 
-        category = _get_category_from_history(history, identifier)
+        category = _find_category(history, identifier)
 
         if category:
             categorized_df.at[index, 'Kategorie'] = category
@@ -92,19 +102,38 @@ def categorize(df, history):
 
     return categorized_df, history
 
-def drop_records_not_from_period():
+def drop_records_not_from_period(df):
     # Find the respective Period to process
-    None
+    res = df.loc[df['Buchungstext'] == "Gehalt/Rente"]
+    indices = list(res.index)
+
+    if len(indices) > 1:
+        print("Moechtest du Ereignisse ausserhalb des letzten Berichtszeitraum ignorieren?")
+        i= str(input("y/n: "))
+
+        if i == 'y':
+            new = indices[0]
+            old = indices[1]
+
+            df = df.iloc[new:old]
+
+    return df
+
+
 
 def drop_unnecessary_columns(df):
     print(df.head(1).to_string())
 
     cols = str(input("Specify Columns to Drop from 1 to n comma-seperated. Eg. '1,5,6': "))
+    if not cols:
+        return
     cols = cols.split(',')
+    to_delete = list()
     for c in cols:
         col = int(c)
         col = col - 1
-        df.drop(df.columns[col], axis=1, inplace=True)
+        to_delete.append(col)
+    df.drop(df.columns[to_delete], axis=1, inplace=True)
 
 def get_history_from_file(filepath):
     with open(filepath, 'r') as f:
@@ -135,6 +164,9 @@ if __name__ == '__main__':
     # Drop unnecessary colums
     drop_unnecessary_columns(df)
 
+    # Find Period of Investigation
+    df = drop_records_not_from_period(df)
+
     history = get_history_from_file(history_filename)
 
     df_categorized, updated_history = categorize(df, history)
@@ -143,21 +175,8 @@ if __name__ == '__main__':
     with open(output_file, 'w') as json_file:
         json.dump(updated_history, json_file)
 
-    df_income, df_expenses, df_paypal = split_df(df_categorized)
-
-    # Check wether sum of records in subframes matchs the amount of records in original frame
-    size_sub_dfs = [len(df_income.index), len(df_expenses.index), len(df_paypal.index)]
-
-    try:
-        check_number_of_records(size_sub_dfs, len(df_categorized.index))
-    except ValueError:
-        sys.exit(1)
-
     o = 'Kontoauszug_kategorisiert_' + str(datetime.now().strftime("%m_%d_%Y")) + '.xlsx'
     with pandas.ExcelWriter(o) as writer:
-        df_income.to_excel(writer, sheet_name='Einkommen')
-        df_expenses.to_excel(writer, sheet_name='Ausgaben')
-        df_paypal.to_excel(writer, sheet_name='PayPal')
-
+        df_categorized.to_excel(writer, sheet_name=datetime.now().strftime("%m_%d_%Y"))
 
     print("Job Done. Have a look at the Output Excelfile")

@@ -50,4 +50,18 @@ CATEGORIES = {
     '15.5': 'Geldstrafen'
 }
 
-# Entgelt, Abbuchung, Dauerauftrag / Terminueberweisung, Lastschrift, Ueberweisung
+def pretty_print_categories():
+    s = ''
+    family = 0
+    for k, v in CATEGORIES.items():
+        number = float(k)
+        number = int(number)
+
+        if family == number:
+            s = s + k + ": " + v + "\t"
+        else:
+            print(s)
+            s = k + ": " + v + "\t"
+            family = number
+
+    print(s)
